@@ -1,0 +1,72 @@
+#!/bin/bash -eu
+
+if [ -z "$1" ]; then
+	echo "Usage: $0 author/packagename"
+	exit 1
+fi
+
+CDB_DOMAIN="https://${CDB_DOMAIN:-content.minetest.net}"
+API_URL="${CDB_DOMAIN}/api/packages"
+
+check_dependencies() {
+    local dependencies=("jq" "curl" "unzip")
+
+    for cmd in "${dependencies[@]}"; do
+        if ! command -v "$cmd" &> /dev/null; then
+            echo "Error: '$cmd' is not installed. Please install it to continue."
+            exit 1
+        fi
+    done
+}
+
+determine_dest_dir() {
+	local dest_dir
+
+	case "$1" in
+		"mod")
+			dest_dir="mods"
+			;;
+		"game")
+			dest_dir="games"
+			;;
+		"txp")
+			dest_dir="textures"
+			;;
+	esac
+
+	echo "$dest_dir"
+}
+
+download_pkg() {
+	# $1 - package name (<author>/<pkgname>)
+
+	echo "Downloading '$1'..."
+
+	package_response=$(curl -s "${API_URL}/$1/")
+
+	if [ "$(echo "$package_response" | jq -r '.error')" != "null" ]; then
+		echo "Error: Package not found or invalid package name."
+		exit 1
+	fi
+
+	package_type=$(echo "$package_response" | jq -r '.type')
+	echo "Package type: '$package_type'"
+	dest_dir=$(determine_dest_dir "$package_type")
+
+	releases_response=$(curl -s "${API_URL}/$1/releases/")
+
+	download_url=$(echo "$releases_response" | jq -r '.[0].url')
+
+	mkdir -p "$dest_dir"
+
+	package_file="/tmp/cdb-dl-${1##*/}.zip"
+	curl -L -o "$package_file" "${CDB_DOMAIN}$download_url"
+
+	unzip -o "$package_file" -d "$dest_dir"
+
+	echo "Package '$1' downloaded and extracted to '$dest_dir'."
+}
+
+check_dependencies
+
+download_pkg "$1"
